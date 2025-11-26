@@ -1,22 +1,28 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Sparkles, Loader2, Cloud, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { TimelineItem, TimelineRow, TagType, CalendarEvent } from './types';
 import TimelineBoard from './components/TimelineBoard';
 import EventModal from './components/EventModal';
 import MonthlyCalendarModal from './components/MonthlyCalendarModal';
 import CalendarEventModal from './components/CalendarEventModal';
+import { supabase } from './lib/supabase';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-const STORAGE_KEY = 'nuvu-plan-2026-v5'; // Bump version for schema change
+const PLAN_ID = 'main'; // Fixed ID for the shared plan
 
 const App: React.FC = () => {
-  // Global State
+  // Global Data State
   const [slogan, setSlogan] = useState('');
   const [rows, setRows] = useState<TimelineRow[]>([]);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+
+  // Sync Status State
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Timeline Modal State
   const [isTimelineModalOpen, setIsTimelineModalOpen] = useState(false);
@@ -31,28 +37,90 @@ const App: React.FC = () => {
   const [calendarEventModalMode, setCalendarEventModalMode] = useState<'create' | 'edit'>('create');
   const [pendingCalendarEvent, setPendingCalendarEvent] = useState<Partial<CalendarEvent>>({});
 
-  // Load Data
+  // --- Supabase Integration ---
+
+  // 1. Fetch Data on Mount
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
+    const fetchData = async () => {
       try {
-        const parsed = JSON.parse(saved);
-        setRows(parsed.rows || []);
-        setItems(parsed.items || []);
-        setSlogan(parsed.slogan || '');
-        setCalendarEvents(parsed.calendarEvents || []);
-      } catch (e) {
-        console.error("Failed to load data", e);
+        const { data, error } = await supabase
+          .from('annual_plans')
+          .select('*')
+          .eq('id', PLAN_ID)
+          .single();
+
+        if (error && error.code !== 'PGRST116') { // PGRST116 is 'Row not found'
+           throw error;
+        }
+
+        if (data) {
+          setSlogan(data.slogan || '');
+          setRows(data.rows || []);
+          setItems(data.items || []);
+          setCalendarEvents(data.calendar_events || []);
+        } else {
+          // Initialize default data if row doesn't exist
+          setRows([{ id: generateId() }, { id: generateId() }, { id: generateId() }]);
+        }
+      } catch (err: any) {
+        console.error('Error fetching data:', err);
+        setErrorMessage('데이터를 불러오는데 실패했습니다.');
+        setSyncStatus('error');
+      } finally {
+        setIsLoaded(true);
       }
-    } else {
-      setRows([{ id: generateId() }, { id: generateId() }, { id: generateId() }]);
-    }
+    };
+
+    fetchData();
   }, []);
 
-  // Save Data
+  // 2. Debounced Save
+  // We use a ref to prevent saving on initial render and to handle debounce cleanup
+  const isFirstRender = useRef(true);
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ slogan, rows, items, calendarEvents }));
-  }, [slogan, rows, items, calendarEvents]);
+    if (!isLoaded) return;
+    
+    // Skip the very first effect run after load if you strictly want to avoid saving what you just fetched.
+    // However, usually it's fine.
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+
+    setSyncStatus('saving');
+    setErrorMessage(null);
+
+    const timer = setTimeout(async () => {
+      try {
+        const payload = {
+          id: PLAN_ID,
+          slogan,
+          rows,
+          items,
+          calendar_events: calendarEvents,
+          updated_at: new Date().toISOString(),
+        };
+
+        const { error } = await supabase
+          .from('annual_plans')
+          .upsert(payload);
+
+        if (error) throw error;
+        setSyncStatus('saved');
+        
+        // Reset saved status to idle after a moment for visual feedback
+        setTimeout(() => setSyncStatus('idle'), 2000);
+      } catch (err: any) {
+        console.error('Error saving data:', err);
+        setErrorMessage('저장 실패 (네트워크를 확인하세요)');
+        setSyncStatus('error');
+      }
+    }, 1000); // 1 second debounce
+
+    return () => clearTimeout(timer);
+  }, [slogan, rows, items, calendarEvents, isLoaded]);
+
 
   // --- Timeline Handlers ---
   const handleAddRow = () => setRows(prev => [...prev, { id: generateId() }]);
@@ -101,26 +169,22 @@ const App: React.FC = () => {
 
   // --- Monthly Calendar Handlers ---
   
-  // Open the month view
   const handleMonthClick = (month: number) => {
     setSelectedMonth(month);
   };
 
-  // User dragged a range in the monthly calendar -> Open Create Modal
   const handleCalendarRangeSelect = (start: string, end: string) => {
     setPendingCalendarEvent({ startDate: start, endDate: end });
     setCalendarEventModalMode('create');
     setIsCalendarEventModalOpen(true);
   };
 
-  // User clicked an existing event -> Open Edit Modal
   const handleCalendarEventClick = (event: CalendarEvent) => {
     setPendingCalendarEvent(event);
     setCalendarEventModalMode('edit');
     setIsCalendarEventModalOpen(true);
   };
 
-  // Save from CalendarEventModal
   const handleCalendarEventSave = (data: Omit<CalendarEvent, 'id'>) => {
     if (calendarEventModalMode === 'create') {
       const newEvent: CalendarEvent = {
@@ -137,7 +201,6 @@ const App: React.FC = () => {
     setPendingCalendarEvent({});
   };
 
-  // Delete from CalendarEventModal
   const handleCalendarEventDelete = () => {
     if (pendingCalendarEvent.id) {
       setCalendarEvents(prev => prev.filter(e => e.id !== pendingCalendarEvent.id));
@@ -146,8 +209,49 @@ const App: React.FC = () => {
     setPendingCalendarEvent({});
   };
 
+  // Loading Screen
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-nuvu-bg">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin text-indigo-500" size={32} />
+          <p className="text-sm text-gray-500 font-medium">데이터 불러오는 중...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-nuvu-bg text-nuvu-primary font-sans selection:bg-indigo-100 selection:text-indigo-800 flex flex-col">
+    <div className="min-h-screen bg-nuvu-bg text-nuvu-primary font-sans selection:bg-indigo-100 selection:text-indigo-800 flex flex-col relative">
+      
+      {/* Sync Status Indicator (Fixed Top Right) */}
+      <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 bg-white/80 backdrop-blur border border-gray-100 rounded-full shadow-sm text-xs font-medium transition-all">
+        {syncStatus === 'saving' && (
+          <>
+            <Cloud size={14} className="text-gray-400 animate-pulse" />
+            <span className="text-gray-500">저장 중...</span>
+          </>
+        )}
+        {syncStatus === 'saved' && (
+          <>
+            <CheckCircle2 size={14} className="text-green-500" />
+            <span className="text-green-600">저장됨</span>
+          </>
+        )}
+        {syncStatus === 'error' && (
+          <>
+            <AlertCircle size={14} className="text-red-500" />
+            <span className="text-red-600">{errorMessage || '오류 발생'}</span>
+          </>
+        )}
+        {syncStatus === 'idle' && (
+           <>
+            <Cloud size={14} className="text-gray-300" />
+            <span className="text-gray-400">동기화 완료</span>
+           </>
+        )}
+      </div>
+
       <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12 flex-1 flex flex-col">
         {/* Header */}
         <header className="mb-8 text-center">

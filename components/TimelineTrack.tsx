@@ -36,7 +36,7 @@ const TimelineTrack: React.FC<TimelineTrackProps> = ({
         <div
           key={month}
           className={`
-            h-14 border-r border-gray-100 last:border-r-0 transition-colors duration-75 select-none
+            h-20 border-r border-gray-100 last:border-r-0 transition-colors duration-75 select-none
             ${isSelected ? 'bg-indigo-50/60' : 'hover:bg-gray-50/30'}
           `}
           onMouseDown={() => onDragStart(row.id, month)}
@@ -65,8 +65,8 @@ const TimelineTrack: React.FC<TimelineTrackProps> = ({
                 onItemClick(item);
               }}
               className={`
-                relative mx-[2px] my-2 rounded-md shadow-sm cursor-pointer pointer-events-auto 
-                flex items-center justify-center group/item overflow-hidden transition-transform hover:scale-[1.02] hover:z-10 hover:shadow-md
+                relative mx-[2px] my-1 rounded-md shadow-sm cursor-pointer pointer-events-auto 
+                flex items-center justify-center group/item overflow-hidden transition-transform hover:scale-[1.01] hover:z-10 hover:shadow-md
                 ${TAG_COLORS[item.tag]}
               `}
               style={{
@@ -75,7 +75,7 @@ const TimelineTrack: React.FC<TimelineTrackProps> = ({
               }}
               title={`${item.title} (${item.tag})`}
             >
-              <span className="text-white text-[11px] font-bold truncate px-2 drop-shadow-sm">
+              <span className="text-white text-sm font-bold truncate px-2 drop-shadow-sm">
                 {item.title}
               </span>
             </div>
@@ -87,7 +87,7 @@ const TimelineTrack: React.FC<TimelineTrackProps> = ({
       {isDraggingThisRow && (
         <div className="absolute inset-0 w-full h-full pointer-events-none grid grid-cols-12">
           <div
-            className="bg-indigo-400/10 border-2 border-indigo-400 rounded-sm mx-[2px] my-2"
+            className="bg-indigo-400/10 border-2 border-indigo-400 rounded-sm mx-[2px] my-1"
             style={{
               gridColumnStart: Math.min(dragState.start, dragState.end),
               gridColumnEnd: Math.max(dragState.start, dragState.end) + 1,
